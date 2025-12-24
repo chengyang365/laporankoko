@@ -1,0 +1,581 @@
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import {
+  Printer,
+  RotateCcw,
+  FileText,
+  Layout,
+  Loader2,
+  Image as ImageIcon,
+  X,
+  BookOpen,
+  Heart
+} from 'lucide-react';
+
+const App = () => {
+  const fileInputRef = useRef(null);
+  const previewRef = useRef(null);
+  const schoolName = "SJK (C) LADANG GRISEK";
+
+  // 团体名称选项
+  const groupOptions = [
+    "TUNAS KADET REMAJA SEKOLAH",
+    "BULAN SABIT MERAH MALAYSIA",
+    "PERSEKUTUAN PENGAKAP MALAYSIA",
+    "PERSATUAN PANDU PUTERI MALAYSIA",
+    "PERSATUAN BAHASA MELAYU",
+    "PERSATUAN BAHASA CINA",
+    "PERSATUAN BAHASA INGGERIS",
+    "KELAB BADMINTON",
+    "KELAB BOLA KERANJANG",
+    "KELAB BOLA SEPAK",
+    "KELAB CATUR",
+    "KELAB OLAHRAGA"
+  ];
+
+  // 时间选项
+  const timeOptions = [
+    "7:00 pagi - 8:00 pagi",
+    "8:00 pagi - 9:00 pagi"
+  ];
+
+  // MADANI 选项配置
+  const madaniOptions = {
+    "Rekayasa Minda": [
+      "Pemikiran Kritis",
+      "Kreatif dan Inovatif",
+      "Pembelajaran Sepanjang Hayat"
+    ],
+    "Rekayasa Sikap": [
+      "Kepimpinan",
+      "Ihsan",
+      "Keseimbangan Diri"
+    ]
+  };
+
+  // 初始状态
+  const initialState = {
+    week: '', // 第几次活动
+    groupName: '',
+    date: '',
+    time: '',
+    location: '',
+    attendance: '',
+    totalStudents: '',
+    teacher: '',
+    details: '',
+    reflection: '',
+    sivikValue: '',
+    sivikActivity: '',
+    madaniFokus: '',
+    madaniElemen: '',
+    // images will be array of { src: string (object URL), file: File }
+    images: []
+  };
+
+  const [formData, setFormData] = useState(initialState);
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // revoke helper to free object URLs
+  const revokeImageUrl = (img) => {
+    try {
+      if (img && img.src && img.src.startsWith('blob:')) {
+        URL.revokeObjectURL(img.src);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  // cleanup on unmount
+  useEffect(() => {
+    return () => {
+      formData.images.forEach(revokeImageUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleInputChange = useCallback((e) => {
+    const { id, value } = e.target;
+
+    if (id === 'madaniFokus') {
+      setFormData(prev => ({ ...prev, [id]: value, madaniElemen: '' }));
+    } else {
+      setFormData((prev) => ({ ...prev, [id]: value }));
+    }
+  }, []);
+
+  const handleImageUpload = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    if (formData.images.length + files.length > 4) {
+      alert("最多只能上传4张照片 / Maksimum 4 keping gambar sahaja.");
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    const newImages = files.map(file => {
+      const url = URL.createObjectURL(file);
+      return { src: url, file };
+    });
+
+    setFormData(prev => ({
+      ...prev,
+      images: [...prev.images, ...newImages].slice(0, 4)
+    }));
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [formData.images.length]);
+
+  const removeImage = useCallback((index) => {
+    setFormData(prev => {
+      const removed = prev.images[index];
+      if (removed) revokeImageUrl(removed);
+      const images = prev.images.filter((_, i) => i !== index);
+      return { ...prev, images };
+    });
+  }, []);
+
+  const resetForm = useCallback(() => {
+    if (window.confirm('确定要清除所有内容吗？/ Adakah anda pasti mahu set semula borang?')) {
+      formData.images.forEach(revokeImageUrl);
+      setFormData(initialState);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.images]);
+
+  const validateBeforePrint = () => {
+    const missing = [];
+    if (!formData.groupName) missing.push('Nama PBB / Persatuan / Kelab');
+    if (!formData.date) missing.push('Tarikh / Date');
+    if (missing.length) {
+      return window.confirm(`以下字段缺失: \n- ${missing.join('\n- ')}\n\n仍然继续打印吗? / Teruskan cetak?`);
+    }
+    return true;
+  };
+
+  const handlePrint = useCallback(() => {
+    if (!validateBeforePrint()) return;
+
+    setIsPrinting(true);
+    setTimeout(() => {
+      try {
+        window.print();
+      } catch (error) {
+        console.error("Print failed:", error);
+        alert("打印启动失败，请按 Ctrl+P 手动打印");
+      } finally {
+        setIsPrinting(false);
+      }
+    }, 500);
+  }, [formData]);
+
+  const calculatePercentage = () => {
+    const att = parseFloat(formData.attendance);
+    const total = parseFloat(formData.totalStudents);
+    if (!Number.isNaN(att) && !Number.isNaN(total) && total > 0) {
+      return ((att / total) * 100).toFixed(2);
+    }
+    return null;
+  };
+
+  const attendanceRate = calculatePercentage();
+
+  // Export to PDF using html2canvas + jsPDF
+  const exportToPdf = useCallback(async () => {
+    if (!previewRef.current) {
+      alert('预览区域不可用 / Preview area not available.');
+      return;
+    }
+
+    if (!validateBeforePrint()) return;
+
+    setIsExporting(true);
+    try {
+      // dynamic imports (install html2canvas and jspdf in your project)
+      const html2canvasModule = await import('html2canvas').then(m => m.default || m);
+      const jspdfModule = await import('jspdf').then(m => m.jsPDF || m.default || m);
+
+      const html2canvas = html2canvasModule;
+      const { jsPDF } = typeof jspdfModule === 'function' ? { jsPDF: jspdfModule } : jspdfModule;
+
+      const element = previewRef.current;
+
+      // Increase scale for better quality
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+
+      // A4 size in mm
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+
+      // calculate image dimensions in mm to fit width
+      const imgProps = pdf.getImageProperties(imgData);
+      const imgWidth = pdfWidth;
+      const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+
+      let position = 0;
+      // if single page fits, just add
+      if (imgHeight <= pdfHeight) {
+        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      } else {
+        // multi-page
+        // canvas height in px matches imgProps.height (in px), and we have PDF height in mm.
+        // We'll page by slicing canvas vertically.
+        const pxPerMm = canvas.height / (imgHeight / pdfHeight * (pdfHeight)); // not straightforward; simpler approach:
+        // Simpler: render image to temporary canvas slices
+        const pageCanvas = document.createElement('canvas');
+        const pageCtx = pageCanvas.getContext('2d');
+
+        // Compute ratio px -> mm using width
+        const pxPerPdfWidth = canvas.width / imgWidth; // px per mm? actually px / mm units mix; instead compute slice height in px that corresponds to pdfHeight in px on scaled image:
+        const scale = canvas.width / imgWidth; // px per mm of pdfWidth
+        // height in px that corresponds to one PDF page:
+        const sliceHeight = Math.floor(pdfHeight * scale);
+
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceHeight;
+
+        let y = 0;
+        while (y < canvas.height) {
+          pageCtx.clearRect(0, 0, pageCanvas.width, pageCanvas.height);
+          pageCtx.drawImage(canvas, 0, y, canvas.width, sliceHeight, 0, 0, pageCanvas.width, pageCanvas.height);
+          const pageData = pageCanvas.toDataURL('image/png');
+          if (y === 0) {
+            pdf.addImage(pageData, 'PNG', 0, 0, imgWidth, (sliceHeight / scale));
+          } else {
+            pdf.addPage();
+            pdf.addImage(pageData, 'PNG', 0, 0, imgWidth, (sliceHeight / scale));
+          }
+          y += sliceHeight;
+        }
+      }
+
+      const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g, '-');
+      pdf.save(`Laporan-Aktiviti-${formData.groupName || 'unknown'}-${timestamp}.pdf`);
+    } catch (err) {
+      console.error('Export PDF failed', err);
+      alert('导出 PDF 失败，请检查控制台 / Export to PDF failed. Make sure html2canvas and jspdf are installed.');
+    } finally {
+      setIsExporting(false);
+    }
+  }, [formData.groupName]);
+
+  return (
+    <div className="min-h-screen bg-gray-100 font-sans p-4 md:p-8 text-slate-800">
+      {/* Header */}
+      <header className="mb-8 text-center print:hidden">
+        <h1 className="text-3xl font-bold text-blue-800 flex items-center justify-center gap-2">
+          <FileText className="w-8 h-8" />
+          课外活动周报生成器
+        </h1>
+        <p className="text-gray-600 mt-2 font-medium">{schoolName}</p>
+      </header>
+
+      <div className="container mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        {/* Form Section */}
+        <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200 print:hidden h-fit sticky top-8 max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-6 border-b pb-2">
+            <h2 className="text-xl font-semibold text-gray-700 flex items-center gap-2">
+              <Layout className="w-5 h-5" />
+              填写信息 / Maklumat
+            </h2>
+            <button onClick={resetForm} className="text-gray-400 hover:text-red-500 flex items-center gap-1 text-sm font-medium">
+              <RotateCcw className="w-4 h-4" /> 重置 / Reset
+            </button>
+          </div>
+          
+          <form className="space-y-5" onSubmit={(e) => e.preventDefault()}>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-1">
+                <label htmlFor="week" className="block text-sm font-bold text-gray-700 mb-1">活动次数 / Minggu / Kali Ke</label>
+                <input type="text" id="week" value={formData.week} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border focus:ring-2 focus:ring-blue-500" placeholder="e.g. 1" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label htmlFor="groupName" className="block text-sm font-bold text-gray-700 mb-1">团体名称 / Nama PBB / Persatuan / Kelab</label>
+                <select id="groupName" value={formData.groupName} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border bg-white focus:ring-2 focus:ring-blue-500">
+                  <option value="">-- 请选择 / Sila Pilih --</option>
+                  {groupOptions.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="date" className="block text-sm font-bold text-gray-700 mb-1">日期 / Tarikh</label>
+                <input type="date" id="date" value={formData.date} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label htmlFor="time" className="block text-sm font-bold text-gray-700 mb-1">时间 / Masa</label>
+                <select id="time" value={formData.time} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border bg-white focus:ring-2 focus:ring-blue-500">
+                  <option value="">-- 请选择 / Sila Pilih --</option>
+                  {timeOptions.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="location" className="block text-sm font-bold text-gray-700 mb-1">地点 / Tempat</label>
+                <input type="text" id="location" value={formData.location} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border focus:ring-2 focus:ring-blue-500" placeholder="Dewan / Kelas" />
+              </div>
+              <div>
+                <label htmlFor="teacher" className="block text-sm font-bold text-gray-700 mb-1">负责老师姓名 / Nama Guru</label>
+                <input type="text" id="teacher" value={formData.teacher} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+              <label className="block text-sm font-bold text-blue-900 mb-2">出席统计 / Kehadiran</label>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 text-center">
+                  <p className="text-[10px] text-blue-600 font-bold mb-1 uppercase">出席 / Hadir</p>
+                  <input type="number" id="attendance" value={formData.attendance} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border text-center font-bold" />
+                </div>
+                <span className="pt-4 text-xl font-bold">/</span>
+                <div className="flex-1 text-center">
+                  <p className="text-[10px] text-blue-600 font-bold mb-1 uppercase">总数 / Jumlah</p>
+                  <input type="number" id="totalStudents" value={formData.totalStudents} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border text-center font-bold" />
+                </div>
+                <div className="flex-1 pt-4 text-center">
+                  {attendanceRate !== null ? <span className="text-blue-800 font-black">{attendanceRate}%</span> : <span className="text-gray-400 text-sm">-</span>}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="details" className="block text-sm font-bold text-gray-700 mb-1">活动内容 / Butiran Aktiviti</label>
+              <textarea id="details" rows="4" value={formData.details} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border shadow-sm focus:ring-2 focus:ring-blue-500" placeholder="1. Pendaftaran..."></textarea>
+            </div>
+
+            {/* 公民教育 */}
+            <div className="p-4 border border-emerald-200 bg-emerald-50 rounded-lg space-y-3">
+              <h3 className="text-sm font-bold text-emerald-800 flex items-center gap-2">
+                <Heart className="w-4 h-4" /> 公民教育 / Pendidikan Sivik
+              </h3>
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label htmlFor="sivikValue" className="block text-xs font-bold text-emerald-700 mb-1">价值观 / Nilai:</label>
+                  <select id="sivikValue" value={formData.sivikValue} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border bg-white text-sm">
+                    <option value="">-- 请选择 / Sila Pilih --</option>
+                    <option value="Kasih sayang">Kasih sayang</option>
+                    <option value="Hormat-menghormati">Hormat-menghormati</option>
+                    <option value="Bertanggungjawab">Bertanggungjawab</option>
+                    <option value="Kegembiraan">Kegembiraan</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="sivikActivity" className="block text-xs font-bold text-emerald-700 mb-1">进行的活动 / Aktiviti:</label>
+                  <input type="text" id="sivikActivity" value={formData.sivikActivity} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border bg-white text-sm" placeholder="所进行的活动内容..." />
+                </div>
+              </div>
+            </div>
+
+            {/* Generasi MADANI */}
+            <div className="p-4 border border-purple-200 bg-purple-50 rounded-lg space-y-3">
+              <h3 className="text-sm font-bold text-purple-800 flex items-center gap-2">
+                <BookOpen className="w-4 h-4" /> 昌明世代 / Generasi MADANI
+              </h3>
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label htmlFor="madaniFokus" className="block text-xs font-bold text-purple-700 mb-1">Fokus Utama:</label>
+                  <select id="madaniFokus" value={formData.madaniFokus} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border bg-white text-sm font-semibold">
+                    <option value="">-- 请选择核心 --</option>
+                    <option value="Rekayasa Minda">Rekayasa Minda</option>
+                    <option value="Rekayasa Sikap">Rekayasa Sikap</option>
+                  </select>
+                </div>
+                {formData.madaniFokus && (
+                  <div>
+                    <label htmlFor="madaniElemen" className="block text-xs font-bold text-purple-700 mb-1">Elemen:</label>
+                    <select id="madaniElemen" value={formData.madaniElemen} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border bg-white text-sm">
+                      <option value="">-- 请选择元素 --</option>
+                      {madaniOptions[formData.madaniFokus].map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Image Upload */}
+            <div className="border-2 border-dashed border-gray-200 p-4 rounded-lg bg-gray-50">
+              <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-blue-600" /> 上传照片 (最多4张)
+              </label>
+              <input type="file" accept="image/*" multiple ref={fileInputRef} onChange={handleImageUpload} disabled={formData.images.length >= 4} className="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-600 file:text-white mb-4" />
+              <div className="grid grid-cols-4 gap-2">
+                {formData.images.map((img, idx) => (
+                  <div key={idx} className="relative aspect-square">
+                    <img src={img.src} alt={`preview-${idx}`} className="w-full h-full object-cover rounded border" />
+                    <button type="button" onClick={() => removeImage(idx)} className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full p-0.5">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="reflection" className="block text-sm font-bold text-gray-700 mb-1">总结与改进 / Refleksi</label>
+              <textarea id="reflection" rows="2" value={formData.reflection} onChange={handleInputChange} className="w-full rounded-md border-gray-300 p-2 border shadow-sm focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+
+            <div className="flex gap-3">
+              <button type="button" disabled={isPrinting || isExporting} onClick={handlePrint} className={`flex-1 ${isPrinting ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'} text-white py-3 rounded-xl font-black flex items-center justify-center gap-3 shadow-lg transition-all`}>
+                {isPrinting ? <><Loader2 className="w-5 h-5 animate-spin" /> Sedang Diproses...</> : <><Printer className="w-5 h-5" /> CETAK LAPORAN (PDF)</>}
+              </button>
+              <button type="button" disabled={isExporting || isPrinting} onClick={exportToPdf} className={`flex-1 ${isExporting ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'} text-white py-3 rounded-xl font-black flex items-center justify-center gap-3 shadow-lg transition-all`}>
+                {isExporting ? <><Loader2 className="w-5 h-5 animate-spin" /> Memproses...</> : <><Printer className="w-5 h-5" /> EXPORT AS PDF</>}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Preview Section */}
+        <div ref={previewRef} className="bg-white p-12 rounded-xl shadow-lg border border-gray-200 print:shadow-none print:border-none print:p-0 print:m-0 min-h-[297mm]">
+          <div className="max-w-[185mm] mx-auto text-black">
+            {/* Header */}
+            <div className="text-center border-b-2 border-black pb-4 mb-6 relative">
+              <h2 className="text-2xl font-black uppercase tracking-widest">{schoolName}</h2>
+              <h3 className="text-lg font-bold mt-1 tracking-tight text-center">LAPORAN AKTIVITI MINGGUAN KOKURIKULUM</h3>
+              {/* Activity Week Label at the top center under the main title */}
+              <div className="mt-2 text-sm font-black uppercase">
+                MINGGU / KALI KE: <span className="border-b border-black px-4">{formData.week || '.......'}</span>
+              </div>
+            </div>
+
+            {/* Info Table */}
+            <table className="w-full border-collapse border border-black mb-5 text-[12px]">
+              <tbody>
+                <tr>
+                  <td className="border border-black p-2 font-black bg-gray-100 w-[30%] uppercase">Nama PBB / Persatuan / Kelab</td>
+                  <td className="border border-black p-2 w-[70%] uppercase font-semibold">{formData.groupName || '-'}</td>
+                </tr>
+                <tr>
+                  <td className="border border-black p-2 font-black bg-gray-100 uppercase">Tarikh / Masa</td>
+                  <td className="border border-black p-2 uppercase font-semibold">{formData.date || '-'} | {formData.time || '-'}</td>
+                </tr>
+                <tr>
+                  <td className="border border-black p-2 font-black bg-gray-100 uppercase">Tempat</td>
+                  <td className="border border-black p-2 uppercase font-semibold">{formData.location || '-'}</td>
+                </tr>
+                <tr>
+                  <td className="border border-black p-2 font-black bg-gray-100 uppercase">Kehadiran</td>
+                  <td className="border border-black p-2 font-bold">
+                    {formData.attendance !== '' && formData.totalStudents !== '' ? `${formData.attendance} / ${formData.totalStudents} (${attendanceRate !== null ? attendanceRate + '%' : '-'})` : '-'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-black p-2 font-black bg-gray-100 uppercase">Guru Penasihat</td>
+                  <td className="border border-black p-2 uppercase font-semibold">{formData.teacher || '-'}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Content Section */}
+            <div className="space-y-4 text-[12px]">
+              <section>
+                <h4 className="font-black border-b border-black mb-1.5 uppercase text-[11px]">1. Butiran Aktiviti:</h4>
+                <div className="whitespace-pre-wrap text-justify min-h-[120px] leading-relaxed">{formData.details || '-'}</div>
+              </section>
+
+              {/* SIVIK & MADANI */}
+              <div className="grid grid-cols-1 gap-3">
+                <section className="border border-black p-2 bg-gray-50/50">
+                  <h4 className="font-black mb-1 uppercase text-[11px]">2. Amalan Pendidikan Sivik:</h4>
+                  <p className="leading-tight"><span className="font-bold">Nilai: </span>{formData.sivikValue || '-'}</p>
+                  <p className="leading-tight"><span className="font-bold">Aktiviti: </span>{formData.sivikActivity || '-'}</p>
+                </section>
+                <section className="border border-black p-2 bg-gray-50/50">
+                  <h4 className="font-black mb-1 uppercase text-[11px]">3. Sisipan Konsep Generasi MADANI:</h4>
+                  <p className="leading-tight">
+                    <span className="font-bold">Fokus Utama: </span>{formData.madaniFokus || '-'}
+                  </p>
+                  <p className="leading-tight">
+                    <span className="font-bold">Elemen: </span>{formData.madaniElemen || '-'}
+                  </p>
+                </section>
+              </div>
+
+              {/* Photos */}
+              <section>
+                <h4 className="font-black border-b border-black mb-2 uppercase text-[11px]">4. Gambar Aktiviti:</h4>
+                <div className="grid grid-cols-2 gap-3 mt-1">
+                  {formData.images.length > 0 ? (
+                    formData.images.map((img, idx) => (
+                      <div key={idx} className="border border-black p-0.5 bg-white shadow-sm">
+                        <img src={img.src} alt={`activity-${idx}`} className="w-full h-[140px] object-cover" />
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-2 text-center py-6 border border-dashed border-gray-400 text-gray-400 italic font-medium uppercase text-[10px]">Tiada gambar disediakan</div>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <h4 className="font-black border-b border-black mb-1.5 uppercase text-[11px]">5. Refleksi / Catatan:</h4>
+                <div className="whitespace-pre-wrap text-justify min-h-[40px] leading-relaxed">{formData.reflection || '-'}</div>
+              </section>
+            </div>
+
+            {/* Signature */}
+            <div className="grid grid-cols-2 gap-10 mt-12 mb-10">
+              <div className="text-left">
+                <p className="font-black mb-14 uppercase text-[11px]">Disediakan oleh,</p>
+                <div className="border-b border-black w-[95%] mb-1"></div>
+                <p className="font-black uppercase text-[11px]">{(formData.teacher || '............................................')}</p>
+                <p className="text-[10px] uppercase font-bold">{formData.groupName || 'Guru Penasihat'}</p>
+                <p className="text-[10px] uppercase font-bold">{schoolName}</p>
+              </div>
+              <div className="text-left">
+                <p className="font-black mb-14 uppercase text-[11px]">Disemak oleh,</p>
+                <div className="border-b border-black w-[95%] mb-1"></div>
+                <p className="font-black uppercase text-[11px]">LIOW SOO CHEN</p>
+                <p className="text-[10px] uppercase font-bold">PENOLONG KANAN KOKURIKULUM</p>
+                <p className="text-[10px] uppercase font-bold">{schoolName}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 text-right text-[8px] text-gray-400 print:block hidden font-bold">
+              DICETAK PADA: {new Date().toLocaleDateString()} | {schoolName}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 0mm; }
+          body { background-color: white !important; padding: 0 !important; -webkit-print-color-adjust: exact; }
+          .container { width: 100% !important; max-width: none !important; padding: 0 !important; margin: 0 !important; }
+          .print\\:hidden { display: none !important; }
+          .grid { display: block !important; }
+          .grid.grid-cols-2 { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .max-w-[185mm] { width: 185mm !important; }
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default App;
